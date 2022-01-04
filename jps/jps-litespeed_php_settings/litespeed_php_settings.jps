@@ -1,0 +1,116 @@
+version: 1.6.2
+type: update
+name: 'Litespeed PHP settings'
+id: 'litespeedPHPSettings'
+
+categories:
+ - apps/others
+
+description:
+  short: Persistant PHP .ini settings
+
+targetNodes:
+  nodeType:
+  - litespeedphp
+  - llsmp
+
+settings:
+  main:
+    fields:
+    - type: displayfield
+      caption: PHP Settings
+      markup: "These values will be included in the last imported .ini file thus will overwrite previous values"
+    - type: toggle
+      name: short_open_tag
+      caption: short_open_tag
+      hideLabel: false
+      required: true
+      value: true
+    - type: text
+      name: custom
+      caption: Custom PHP directives
+      default: "; this is a comment"
+    - type: displayfield
+      caption: Litespeed Settings
+      markup: "Litespeed VHost Settings"
+    - type: toggle
+      columns: 2
+      caption: Enable?
+      name: customLiteSpeedSettings
+      value: false
+      hideLabel: false
+      hidden: false
+      showIf:
+        true: 
+          - type: string
+            name: customDocRoot
+            caption: docRoot
+            tooltip: | 
+                       Custom LiteSpeed document root in VHOST.
+                       Add a trailing /
+            default: $VH_ROOT/ROOT/
+
+buttons:
+  - caption: Show
+    loadingText: Checking..
+    action: checkStatus
+  - menu:
+    - caption: Configure
+      loadingText: Updating..
+      settings: main
+      confirmText: Are you sure you wish to change PHP settings?
+      action: doInstall
+      successText: Success
+  
+onAfterRedeployContainer: doInstall
+    
+onAfterClone: doInstall
+  
+onInstall: doInstall
+
+onAfterAddNode: doInstall
+
+onUninstall:
+  cmd [${targetNodes.nodeGroup}]:
+    - phpdPath=$(php -i | grep "Scan this dir for additional .ini files" | awk '{print $NF}')
+    - rm -f $phpdPath/91-litespeedPHPSettings.ini
+    - |-
+        if [ "${settings.customLiteSpeedSettings}" == "true" ]; then
+          sed 's#<docRoot>.*</docRoot>#<docRoot>$VH_ROOT/ROOT/'</docRoot>#' -i /var/www/conf/vhconf.xml;
+        fi;     
+    - sudo jem service restart
+  sayYes: true
+
+actions:
+  doInstall:
+    - writeFile:
+        nodeGroup: ${targetNodes.nodeGroup}
+        path: /tmp/91-litespeedPHPSettings.ini
+        body: | 
+          short_open_tag = ${settings.short_open_tag}
+          ${settings.custom}
+    - cmd [${targetNodes.nodeGroup}]:
+      - phpdPath=$(php -i | grep "Scan this dir for additional .ini files" | awk '{print $NF}')
+      - mv /tmp/91-litespeedPHPSettings.ini $phpdPath
+      - |- 
+          if [ "${settings.customLiteSpeedSettings}" == "true" ]; then
+            sed 's#<docRoot>.*</docRoot>#<docRoot>$VH_ROOT'${settings.customDocRoot}'</docRoot>#' -i /var/www/conf/vhconf.xml;
+          fi;
+      - sudo jem service restart
+      sayYes: true
+
+  checkStatus:
+    - cmd [${targetNodes.nodeGroup}]:
+      - phpdPath=$(php -i | grep "Scan this dir for additional .ini files" | awk '{print $NF}')
+      - echo "cat $phpdPath/91-litespeedPHPSettings.ini"
+      - cat $phpdPath/91-litespeedPHPSettings.ini
+      - |- 
+          if [ "${settings.customLiteSpeedSettings}" == "true" ]; then
+            echo "---";
+            echo "LiteSpeed VHOST docRoot:";
+            grep "<docRoot>" /var/www/conf/vhconf.xml;
+          fi;
+      user: root
+    - message: ${response.out}
+      script: |
+        return {'result': 'info', 'message': message.replace(/\n/g, '  \n')}

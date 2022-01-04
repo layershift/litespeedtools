@@ -1,0 +1,1 @@
+# jps-litespeed_php_settings
