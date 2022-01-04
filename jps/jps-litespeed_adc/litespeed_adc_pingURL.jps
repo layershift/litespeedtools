@@ -14,17 +14,12 @@ targetNodes:
   - litespeedadc
 
 globals:
-  pingURL: ${settings.pingURL}
+  pingURL: pingURL.php
 
 
 settings:
   main:
     fields:
-    - type: string
-      caption: pingURL
-      name: pingURL
-      default: pingURL.php
-      hidden: true
     - type: string
       caption: documentRoot
       name: documentRoot
@@ -62,8 +57,14 @@ onAfterRedeployContainer [bl]:
       updatePingURL:
         nodeId: ${@i.nodeid}
 
-onAfterClone: doInstall
-  
+onAfterClone:
+  - script: return {result:0, jps:MANIFEST};
+  - install: ${response.jps}
+    envName: ${event.response.env.envName}    
+    settings: 
+      documentRoot: ${settings.documentRoot}
+      pingInterval: ${settings.pingInterval}
+
 onInstall: doInstall
 
 onAfterScaleOut [nodeGroup:cp]: 
