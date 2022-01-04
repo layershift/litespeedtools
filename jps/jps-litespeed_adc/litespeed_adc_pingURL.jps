@@ -1,0 +1,173 @@
+version: 1.6.2
+type: update
+name: 'Litespeed ADC PingURL'
+id: 'litespeedADCPingURL'
+
+categories:
+ - apps/others
+
+description:
+  short: Change ADC backend pingURL
+
+targetNodes:
+  nodeType:
+  - litespeedadc
+
+globals:
+  pingURL: ${settings.pingURL}
+
+
+settings:
+  main:
+    fields:
+    - type: string
+      caption: pingURL
+      name: pingURL
+      default: pingURL.php
+      hidden: true
+    - type: string
+      caption: documentRoot
+      name: documentRoot
+      default: /var/www/webroot/ROOT/
+    - type: displayfield
+      name: displayfield
+      markup: "The location were to create the pingURL.php file"
+    - type: string
+      caption: pingInterval
+      name: pingInterval
+      default: 1
+      regex: "^[1-9]+[0-9]?$"
+      regexText: Not a valid number positive integer number
+      tooltip: Seconds between pings on each WorkerGroup member.
+
+buttons:
+  - caption: Show
+    loadingText: Checking..
+    action: checkStatus
+  - menu:
+    - caption: Configure
+      loadingText: Updating..
+      settings: main
+      confirmText: Are you sure you wish to change the settings?
+      action: doInstall
+      successText: Success
+  
+onAfterRedeployContainer [cp]:
+  - forEach(event.response.responses):
+      deployTestScript:
+        nodeId: ${@i.nodeid}
+
+onAfterRedeployContainer [bl]:
+  - forEach(event.response.responses):
+      updatePingURL:
+        nodeId: ${@i.nodeid}
+
+onAfterClone: doInstall
+  
+onInstall: doInstall
+
+onAfterScaleOut [nodeGroup:cp]: 
+  - forEach(event.response.nodes):
+      deployTestScript:
+        nodeId: ${@i.id}
+  - forEach(nodes.bl):
+      updatePingURL:
+        nodeId: ${@i.id} 
+  
+onAfterScaleOut [nodeGroup:bl]: 
+  - forEach(event.response.nodes):
+      updatePingURL:
+        nodeId: ${@i.id}
+
+onUninstall:
+  - cmd [bl]:
+    - eval $(grep DEFAULT_LSLB_CONFIG= /var/www/bin/lslbctrl | head -n1)
+    - healtCheckURL="/";
+    - |-
+          for name in $(/usr/bin/xmlstarlet sel -t -v "loadBalancerConfig/loadBalancerList/loadBalancer[name='clusterHTTP']/workerGroupList/workerGroup/name" ${DEFAULT_LSLB_CONFIG}); do 
+              pingURL=$(/usr/bin/xmlstarlet sel -t -v "loadBalancerConfig/loadBalancerList/loadBalancer[name='clusterHTTP']/workerGroupList/workerGroup[name='$name']/pingUrl" ${DEFAULT_LSLB_CONFIG}); 
+              newPingURL=$(/usr/bin/xmlstarlet sel -t -v "loadBalancerConfig/loadBalancerList/loadBalancer[name='clusterHTTP']/workerGroupList/workerGroup[name='$name']/nodeAddresses" ${DEFAULT_LSLB_CONFIG}|awk '{print "http://"$0":80'$healtCheckURL'"}'); 
+              echo -e  "$name\n$pingURL\n$newPingURL\n"; 
+              /usr/bin/xmlstarlet ed --pf --inplace -u "loadBalancerConfig/loadBalancerList/loadBalancer[name='clusterHTTP']/workerGroupList/workerGroup[name='$name']/pingUrl" -v "$newPingURL" ${DEFAULT_LSLB_CONFIG}
+              /usr/bin/xmlstarlet sel -t -v "loadBalancerConfig/loadBalancerList/loadBalancer[name='clusterHTTP']/workerGroupList/workerGroup[name='$name']/pingUrl" ${DEFAULT_LSLB_CONFIG}
+              echo""
+              /usr/bin/xmlstarlet ed --pf --inplace -u "loadBalancerConfig/loadBalancerList/loadBalancer[name='clusterHTTP']/workerGroupList/workerGroup[name='$name']/pingInterval" -v "${settings.pingInterval}" ${DEFAULT_LSLB_CONFIG}
+          done;
+    sayYes: true
+  - cmd [bl]:
+    - /var/www/bin/lslbctrl reload
+    sayYes: true
+    user: root
+  - cmd [cp]:
+    - rm "${settings.documentRoot}/${globals.pingURL}"
+    sayYes: true
+
+actions:
+  doInstall:
+    - log:
+      - ${settings}
+      - ${globals}
+
+    - forEach(nodes.cp):
+        deployTestScript:
+          nodeId: ${@i.id} 
+    - forEach(nodes.bl):
+        updatePingURL:
+          nodeId: ${@i.id} 
+
+    - log:
+      - ${settings}
+      - ${globals}
+
+  deployTestScript:
+    - cmd[${this.nodeId}]:
+      - echo "<?php echo 'ok';" > "${settings.documentRoot}/${globals.pingURL}"
+      sayYes: true
+
+  updatePingURL:
+    - cmd[${this.nodeId}]:
+      - eval $(grep DEFAULT_LSLB_CONFIG= /var/www/bin/lslbctrl | head -n1)
+      - healtCheckURL="/${globals.pingURL}";
+      - |-
+          for name in $(/usr/bin/xmlstarlet sel -t -v "loadBalancerConfig/loadBalancerList/loadBalancer[name='clusterHTTP']/workerGroupList/workerGroup/name" ${DEFAULT_LSLB_CONFIG}); do 
+              pingURL=$(/usr/bin/xmlstarlet sel -t -v "loadBalancerConfig/loadBalancerList/loadBalancer[name='clusterHTTP']/workerGroupList/workerGroup[name='$name']/pingUrl" ${DEFAULT_LSLB_CONFIG}); 
+              newPingURL=$(/usr/bin/xmlstarlet sel -t -v "loadBalancerConfig/loadBalancerList/loadBalancer[name='clusterHTTP']/workerGroupList/workerGroup[name='$name']/nodeAddresses" ${DEFAULT_LSLB_CONFIG}|awk '{print "http://"$0":80'$healtCheckURL'"}'); 
+              echo -e  "$name\n$pingURL\n$newPingURL\n"; 
+              /usr/bin/xmlstarlet ed --pf --inplace -u "loadBalancerConfig/loadBalancerList/loadBalancer[name='clusterHTTP']/workerGroupList/workerGroup[name='$name']/pingUrl" -v "$newPingURL" ${DEFAULT_LSLB_CONFIG}
+              /usr/bin/xmlstarlet sel -t -v "loadBalancerConfig/loadBalancerList/loadBalancer[name='clusterHTTP']/workerGroupList/workerGroup[name='$name']/pingUrl" ${DEFAULT_LSLB_CONFIG}
+              /usr/bin/xmlstarlet ed --pf --inplace -u "loadBalancerConfig/loadBalancerList/loadBalancer[name='clusterHTTP']/workerGroupList/workerGroup[name='$name']/pingInterval" -v "${settings.pingInterval}" ${DEFAULT_LSLB_CONFIG}
+              echo""
+          done;
+      sayYes: true
+    - cmd [${this.nodeId}]:
+      - /var/www/bin/lslbctrl reload
+      sayYes: true
+      user: root
+
+  checkStatus:
+    - log:
+      - ${settings}
+      - ${globals}
+    - setGlobals:
+      - message: ""
+    - log:
+      - ${settings}
+      - ${globals}
+    - forEach(node:targetNodes):
+      - cmd [${@node.id}]:
+        - echo -e "\nNodeID= ${@node.id}";
+        - echo "[pingInterval] - [pingURL] for each WorkerGroup in clusterHTTP"
+        - eval $(grep DEFAULT_LSLB_CONFIG= /var/www/bin/lslbctrl | head -n1)
+        - |-
+            for name in $(/usr/bin/xmlstarlet sel -t -v "loadBalancerConfig/loadBalancerList/loadBalancer[name='clusterHTTP']/workerGroupList/workerGroup/name" ${DEFAULT_LSLB_CONFIG}); do 
+                /usr/bin/xmlstarlet sel -t -v "loadBalancerConfig/loadBalancerList/loadBalancer[name='clusterHTTP']/workerGroupList/workerGroup[name='$name']/pingInterval" ${DEFAULT_LSLB_CONFIG}
+                echo -ne " - \t";
+                /usr/bin/xmlstarlet sel -t -v "loadBalancerConfig/loadBalancerList/loadBalancer[name='clusterHTTP']/workerGroupList/workerGroup[name='$name']/pingUrl" ${DEFAULT_LSLB_CONFIG}
+                echo ""
+            done;
+      - setGlobals:
+        - message: ${globals.message}${response.out}
+
+    - message: ${globals.message}
+      script: |
+        return {'result': 'info', 'message': message.replace(/\n/g, '  \n')}
